@@ -1,0 +1,439 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, fig.width  = 5, fig.height = 7, dev = "png")
+# use a consistent 5x7 plot size and ensure plots display properly in HTML using PNG format.
+
+# library
+library(dplyr)
+library(plotly)
+```
+
+## Introduction {.tabset}
+Analyzing the dataset that contains the performance of the bank’s recent marketing campaigns to help provide data driven insights to support future strategic decisions, including exploration, preprocessing, visualization, analysis, and prediction. Lastly, I made sure that echo, warning, and message were set to false to keep things clean.
+<br><br>
+Note: I wrote some introductory sentences about what I will do before writing the code. Then at the end of each subsection, I write what I did and how it is interpreted.
+
+<!-- Tab 1 -->
+### 1. Identifying and Handling Data
+
+#### 1.1. Identify data quality issues 
+First, I looked into the raw dataset to check whether there were problems that could mess up the analysis later. Specifically, I wanted to know if there were any missing data, duplicate rows, strange values like "unknown", or weird numbers like 999 in pdays. Also, I was curious if any columns had outliers that might affect how we interpret the data.
+
+1.1.0. The Data Before Cleaning:
+```{r 1.1., echo=FALSE, warning=FALSE, message=FALSE}
+
+df = read.csv("data_A.csv")
+
+dim_df = dim(df)
+cat(" Data Overview:\n",
+  "Number of Row:", dim_df[1], "\n",
+  "Number of Col:", dim_df[2], "\n")
+
+head(df, 10)
+summary(df)
+str(df)
+
+# check for unique values
+for (col_name in names(df)) {
+  if (is.character(df[[col_name]])) {
+    cat("Unique values in column:", col_name, "\n")
+    vals <- unique(trimws(df[[col_name]]))
+    # Change "" to "Empty String" so it looks clear
+    vals[vals == ""] <- "Empty String"
+    print(vals)
+  }
+}
+
+# column initialization
+categorical_cols = c("job", "marital", "education", "default", "housing", "loan", "contact", "month", "day_of_week", "poutcome")
+numerical_cols <- c("age", "duration", "campaign", "pdays", "previous")
+```
+1.1.1. Total Missing Values per Column:
+```{r 1.1.1, echo=FALSE, warning=FALSE, message=FALSE}
+colSums(is.na(df))
+```
+1.1.2. Total Duplicate Records:
+```{r 1.1.2, echo=FALSE, warning=FALSE, message=FALSE}
+dup_df = sum(duplicated(df))
+dup_df
+```
+1.1.3. Total Inconsistent or Unknown Categories per Column:
+```{r 1.1.3, echo=FALSE, warning=FALSE, message=FALSE}
+# create a new dataframe
+jumlah_unknown = data.frame(
+  column = character(),
+  count_unknown = integer()
+)
+
+# check for weird data
+for (kolom in categorical_cols) {
+  jumlah = sum(df[[kolom]] == "unknown" | df[[kolom]] == "")
+  jumlah_unknown = rbind(jumlah_unknown, data.frame(column = kolom, count_unknown = jumlah))
+}
+jumlah_unknown
+```
+1.1.4. Total Outliers or Extreme Values per Column:
+```{r 1.1.4, echo=FALSE, warning=FALSE, message=FALSE}
+# count the outlier that appears and put it in the new variable
+outlier_counts = c()
+for (colname in names(df)) {
+  if (is.numeric(df[[colname]])) {
+    q1 = quantile(df[[colname]], 0.25, na.rm = TRUE)
+    q3 = quantile(df[[colname]], 0.75, na.rm = TRUE)
+    iqr = q3 - q1
+    lower = q1 - 1.5 * iqr
+    upper = q3 + 1.5 * iqr
+    count = sum(df[[colname]] < lower | df[[colname]] > upper, na.rm = TRUE)
+    outlier_counts[colname] = count
+  }
+}
+outlier_counts
+
+# display the summary of the numerical data
+summary_numerik = summary(df[, c("age", "duration", "campaign", "pdays", "previous")])
+summary_numerik
+```
+1.1.5. Total Noisy or Irrelevant Values per Column:
+```{r 1.1.5, echo=FALSE, warning=FALSE, message=FALSE}
+# count the noisy data that appears and put it in the new variable
+noisy_counts = c()
+for (colname in names(df)) {
+  if (is.numeric(df[[colname]])) {
+    noisy_999 = sum(df[[colname]] == 999, na.rm = TRUE)
+    noisy_counts[colname] = noisy_999
+  }
+}
+noisy_counts
+```
+I provide an overview of the dataset first which contains dim, head, summary, and str so that the raw data can be understood first through various things presented such as the presence of unknown data in several parts, the dataset has how many rows and columns, a brief explanation of the data, unique values in the dataset so that you can see any strange and inappropriate data such as "unknown" or empty strings. Then, from the data above we can see that it turns out that the missing value is only a little but most of it is "unknown" so that it is not detected as a missing value. Then the data turns out not to be duplicate so that all the data is clean and can be processed. It turns out that there is also a lot of inappropriate data such as "unknown" and empty strings and is spread most of it in the default column. It is also presented how many outlier data are there along with their summaries that can see the upper limit, lower limit, and others. Finally, there is noisy data only in the pdays column, namely "999" which means there is no data yet.
+
+#### 1.2. Handle the issues that were identified
+After finding several issues, I cleaned the dataset to make sure the results would be reliable. I removed any duplicated rows, replaced "unknown" and empty strings with NA so they wouldn't be accidentally used as valid values. These changes should help avoid misleading results during the analysis.
+```{r 1.2., echo=FALSE, warning=FALSE, message=FALSE}
+# fixing the NA values.
+clean_data = df %>%
+  distinct() %>%
+  mutate(across(everything(), ~replace(., . == "unknown", NA)))
+  clean_data$job[trimws(clean_data$job) == ""] <- NA
+
+# drop the row if NA >= 50% on that row
+na_prop = rowMeans(is.na(clean_data))
+clean_data = clean_data[na_prop <= 0.5, ]
+
+# input the median and mode to NA values
+for (colname in names(clean_data)) {
+  column_data = clean_data[[colname]]
+  if (is.numeric(column_data)) {
+    med = median(column_data, na.rm = TRUE)
+    column_data[is.na(column_data)] = med
+  } else if (is.character(column_data)) {
+    freq_table <- table(column_data)
+    sorted <- sort(freq_table, decreasing = TRUE)
+    mode_val <- names(sorted)[1]
+    column_data[is.na(column_data)] <- mode_val
+  }
+  clean_data[[colname]] = column_data
+}
+
+# new data overview
+dim_clean_df = dim(clean_data)
+cat(" Data Overview:\n",
+  "Number of Row:", dim_clean_df[1], "\n",
+  "Number of Col:", dim_clean_df[2], "\n")
+
+# display the new data
+head(clean_data, 10)
+```
+Here, I clean the data through inappropriate things that have been found in the previous section, for example missing values. First, I will make "unknown" and empty strings into NA values first so that they can be changed and adjusted more easily. Before filling in the NA value, I will first check if there is any data that is less useful with the logic that if there is a row that has empty data (NA value) greater than or equal to 50% then the row will be deleted. After that, I will enter the median for the numerical column and the mode for the categorical column into NA values. So now, the "unknown" data and empty strings have been changed and filled in. I did not remove outliers because in my opinion, outliers can be an insight in themselves to see the distribution of a variable. Therefore, I also take more medians than means so that outliers do not affect the data excessively. Lastly, I also did not remove noisy data because noisy data does have a special meaning that can be a certain insight. After that, the new data that has been cleaned will be displayed so that you can see the difference.
+
+#### 1.3. Summary statistics and initial exploration
+Here, I calculated the central tendency and variability for the numeric columns. I also looked at how age differs across job types and make the summary table for it.
+
+1.3.1. The Central Tendency and Variability for Numerical Columns:
+```{r 1.3.1, echo=FALSE, warning=FALSE, message=FALSE}
+# create a new dataframe
+summary_stats = data.frame(
+  Variable = character(),
+  Mean = numeric(),
+  Median = numeric(),
+  Mode = numeric(),
+  SD = numeric(),
+  Min = numeric(),
+  Max = numeric(),
+  Range = numeric()
+)
+
+# calculate the data
+for (colname in names(clean_data)) {
+  if (is.numeric(clean_data[[colname]])) {
+    col_data = clean_data[[colname]]
+
+    # count for mode
+    unique_vals = unique(col_data)
+    max_count = 0
+    mode_val = NA
+    for (val in unique_vals) {
+      count = sum(col_data == val)
+      if (count > max_count) {
+        max_count = count
+        mode_val = val
+      }
+    }
+
+    # put the data in the new dataframe
+    summary_stats = rbind(
+      summary_stats,
+      data.frame(
+        Variable = colname,
+        Mean = round(mean(col_data), 2),
+        Median = round(median(col_data), 2),
+        Mode = mode_val,
+        SD = round(sd(col_data), 2),
+        Min = min(col_data),
+        Max = max(col_data),
+        Range = max(col_data) - min(col_data)
+      )
+    )
+  }
+}
+summary_stats
+```
+1.3.2. The Summary Table:
+```{r 1.3.2, echo=FALSE, warning=FALSE, message=FALSE}
+# summary table of age differs across job types
+age_by_job <- clean_data %>%
+  group_by(job) %>%
+  summarise(
+    mean_age = round(mean(age), 2),
+    median_age = round(median(age), 2),
+    sd_age = round(sd(age), 2),
+    .groups = "drop")
+as.data.frame(age_by_job)
+```
+To get a quick recap for the data, I calculated the central tendency (mean, median, mode) and variability (standard deviation, min, max, range) for the numeric columns, with also the summary table of age differs across job types. From the data, it can be seen that duration has a large range and standard deviation which means as some calls might have been very short while others were much longer. It can also be seen that pdays are still dominant at 999 which means that there are still many who have never been contacted. Then, from age we see that most of the clients are middle-aged adults. Finally, it can also be seen that there is a fairly visible difference between job types compared to age and This tells us that job type is strongly related to age, and knowing this can help the bank target specific age groups indirectly through job segmentation.
+
+<!-- Tab 2 -->
+### 2. Relationship Analysis
+
+#### 2.1. Explore Variable Relationships:
+In this part, I wanted to see which variables might influence whether someone says yes to the campaign. So I checked things like how long the call lasted, their job, etc. I compared them with the final result (y) to see if there's any obvious connection.
+```{r 2.1., echo=FALSE, warning=FALSE, message=FALSE}
+# distribution visual before calculate the correlation and etc
+# histogram for age distribution
+hist(clean_data$age, main = "Histogram of Age", xlab = "Age")
+# boxplot for duration distribution
+boxplot(clean_data$duration, main = "Boxplot of Duration")
+# correlation matrix and heatmap distribution
+cor_matrix <- cor(clean_data[, numerical_cols])
+heatmap(cor_matrix, main = "Corr Heatmap of Numerical", Rowv = NA, Colv = NA)
+
+# convert y to numeric for correlation
+clean_data$y_num <- ifelse(clean_data$y == "yes", 1, 0)
+
+"Cross-tabulation: education vs y"
+table_education_y <- table(clean_data$education, clean_data$y)
+prop_table <- prop.table(table_education_y, margin = 1)
+print(prop_table)
+
+"Cross-tabulation: job vs y"
+table_job_y <- table(clean_data$job, clean_data$y)
+prop_table <- prop.table(table_job_y, margin = 1)
+print(prop_table)
+
+"Grouped summary: duration by y"
+duration_by_y <- clean_data %>%
+  group_by(y) %>%
+  summarise(
+    mean_duration = mean(duration),
+    median_duration = median(duration),
+    sd_duration = sd(duration),
+    n = n()
+  )
+as.data.frame(duration_by_y)
+```
+To learn more, I started by exploring several key variables: age, call duration, job type, and previous contact history. I created and visualized a histogram of age and a boxplot of duration. This gave me a clear picture of their spread, age is mostly centered between 30–50, while duration varies widely, with some extreme values (outliers). The boxplot especially helped reveal that many calls were short, but a few were very long, which could impact results. Next, I continued with a correlation heatmap for all numerical columns, to see how the numerical columns relate to the target y variable. Finally, I changed "yes" and "no" to 1 and 0 to make it easier to compute actual correlation values.
+
+I chose 2 categorical columns, namely education and job, which will be made into cross-tabulations, and 1 numerical column, namely duration, which will be made into grouped summaries. 
+
+By looking at the first cross-tabulation, it can be seen that education does play an important role here. It can be seen that clients with higher education, such as those with university degrees or tertiary education, tend to have a higher response rate. Clients with unknown or basic education show lower likelihood to subscribe. 
+Interestingly, clients with secondary education have a moderate response rate. This means that clients with higher education have better financial literacy that leads them to consider the offer more seriously.
+
+By looking at the second cross-tabulation, it can be seen that retired clients have the highest proportion of "yes", because they may already have a lot of free time and reasonable savings. Students and blue-collar workers tend to show lower response rates. Jobs like admin, technician, and management have moderate success, which might reflect both the relevance of the offer and the client's interest in financial products. This pattern provides an idea of who is more interested and who is likely to achieve the goal by looking at the busyness of their work.
+
+Lastly, there is a grouped summaries for duration. Based on the data, clients who say "yes" usually have more mean and median on their duration, whether it is because the clients are interested so they chat longer or the agents invest more time in convincing them. Combining these three variables gives a powerful basis for segmentation, allowing the bank to prioritize call time and offer relevance based on client profiles.
+
+#### 2.2. Feature Engineering:
+To make analysis easier and more meaningful, I created a few new columns according to what the question asks for. I grouped ages into three categories (<30, 30-50, >50) to simplify comparisons, transformed pdays into a recency_level (never, recent, old), and calculated a score that adds up how many times the person was contacted in total.
+```{r 2.2., echo=FALSE, warning=FALSE, message=FALSE}
+# make new column: age_group
+clean_data <- clean_data %>%
+  mutate(age_group = case_when(
+    age < 30 ~ "<30",
+    age <= 50 ~ "30–50",
+    TRUE ~ ">50"
+  ))
+
+# make new column: recency_level
+clean_data <- clean_data %>%
+  mutate(recency_level = case_when(
+    pdays == 999 ~ "never",
+    pdays <= 30 ~ "recent",
+    TRUE ~ "old"
+  ))
+
+# make new column: total_contact_score
+clean_data <- clean_data %>%
+  mutate(total_contact_score = campaign + previous)
+
+# display the new data
+head(clean_data, 10)
+```
+In this section, I created 3 new variable columns with mutate to help simplify and enhance the analysis based on what the question asks. These new columns will make it much easier to create visualizations or do segmentation later if the columns are needed. 
+
+First, in the age_group column. I transformed the continuous age column into a categorical variable by grouping it into 3 segments:
+less than 30: Young clients
+30–50: Middle-aged clients
+more than 50: Older clients
+With this grouping, data from age can be viewed more easily and more structured.
+
+Second, in the recency_level column. I transformed and simplified the pdays column which was previously less pleasing to the eye into 3 category levels:
+"never": pdays = 999
+"recent": pdays <= 30
+"old": contacted a long time ago
+With this grouping, we can see the contents of this column more clearly and can take a more useful strategy.
+
+Finally, in the total_contact_score column. I added new data by adding 2 variables so that it can be seen more clearly how many times the bank reached out to each client overall. This column is the sum of the campaign and previous columns. Lastly, I display several of the new columns with head.
+
+#### 2.3. Interactive Visualizations of Relationships:
+These interactive charts or visualization of relationships help show how different variables relate to each other in a more clear way. I made one for comparing two categorical variables, one for comparing a numerical variable and a categorical variable, and last one for multidimensional.
+```{r 2.3., echo=FALSE, warning=FALSE, message=FALSE}
+# visualization 1: two categorical variables (job vs marital)
+freq_matrix <- table(clean_data$job, clean_data$marital)
+# heatmap
+plot_job_marital <- plot_ly(
+  x = colnames(freq_matrix),
+  y = rownames(freq_matrix),
+  z = as.matrix(freq_matrix),
+  type = "heatmap",
+  colors = colorRamp(c("white", "darkblue"))) %>%
+  layout(
+    title = "Heatmap: Job vs Marital Status",
+    xaxis = list(title = "Marital Status"),
+    yaxis = list(title = "Job")
+  )
+
+# visualization 2: one numeric vs one categorical (duration vs y)
+plot_duration_vs_y <- plot_ly(
+  data = clean_data,
+  x = ~y,
+  y = ~duration,
+  type = "box",
+  color = ~y) %>% layout(title = "Duration of Contact by Subscription Outcome")
+
+# Visualization 3: Multidimensional (duration vs education, grouped by y)
+plot_duration_by_edu <- plot_ly(
+  data = clean_data,
+  x = ~education,
+  y = ~duration,
+  color = ~y,
+  type = "box") %>% layout(title = "Duration vs Education Grouped by Subscription")
+
+# display the visual
+plot_job_marital
+plot_duration_vs_y
+plot_duration_by_edu
+```
+In this section, I created 3 interactive charts with plotly to visualize how several variables are related. Each visualization focuses on a different type of chart, two categorical variables, one numeric and one categorical, and a multi-dimensional comparison. 
+
+First, I used a heatmap to display the frequency of job and marital status comparisons and see which ones are most common. Before creating the heatmap, I created a table first and then continued to create a heatmap based on the table. Based on the data, it can be seen that The most frequent combinations are married clients in blue-collar or technician jobs, and single clients in student or admin roles. From here, we can also take some to create different approach strategies for clients with different backgrounds. 
+
+Second, I used a boxplot to compare duration as numerical and subscription outcome as categorical. Based on this visualization, it can be seen that the duration of calls is clearly higher for clients who subscribed. Clients who said “no” tend to have shorter call durations, and their boxplot shows less spread. This supports the earlier insight that longer calls lead to more successful outcomes. It reinforces the importance of not rushing calls and giving enough time for a proper discussion with the client.
+
+Finally, I use a boxplot for multidimensionality. I compare 3 dimensions containing duration, education, and divided by y or subscription outcome. From the data, for almost all education levels, the “yes” group has longer call durations just like the previous chart. Interestingly, clients with higher education tend to have slightly longer durations overall. The spread between “yes” and “no” is also consistent across education levels. This chart shows how both education level and call duration relate to success, and how the patterns stay consistent across groups.
+
+<!-- Tab 3 -->
+### 3. Insight and Recommendations
+
+#### 3.1. Data Storytelling Through Visual Design:
+To make it easier to search and analyze the existing data, I will summarize it into 2 key findings and 2 main interactive charts by paying attention to visual storytelling principles, such as clean title, informative labels, and highlighting the key using color or annotation.
+
+3.1.1. Key Finding 1:
+```{r 3.1.1, echo=FALSE, warning=FALSE, message=FALSE}
+edu_plot_data <- clean_data %>%
+  filter(!is.na(job), !is.na(education)) %>%
+  mutate(
+    edu_group = case_when(
+      education %in% c("illiterate", "basic.4y", "basic.6y", "basic.9y") ~ "Below High School",
+      education == "high.school" ~ "High School",
+      education %in% c("professional.course", "university.degree") ~ "Higher Education",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  group_by(job, edu_group) %>%
+  summarise(count = n(), .groups = "drop")
+
+plot_edu_simple <- plot_ly(
+  data = edu_plot_data,
+  x = ~job,
+  y = ~count,
+  color = ~edu_group,
+  type = "bar",
+  colors = c("Below High School" = "#6A5ACD",
+             "High School" = "#87CEEB",
+             "Higher Education" = "#FFA07A")) %>%
+  layout(
+    title = "Education Group Distribution by Job",
+    xaxis = list(title = "Job", tickangle = -45),
+    yaxis = list(title = "Percentage of Clients"),
+    barmode = "stack",
+    barnorm = "percent",
+    legend = list(title = list(text = "Education Group"))
+  )
+plot_edu_simple
+```
+Before making the first chart, I regrouped the detailed education levels into broader and more understandable categories first. With a division like this:
+Below High School = includes basic.4y, basic.6y, basic.9y, and illiterate.
+High School = for high.school.
+Higher Education = includes university.degree and professional.course.
+Then, I made a summary table to calculate clients from different job types and divided by education group. Then finally, the main visualization, I use a stacked percentage bar chart to display the distribution of education levels across job types. Here I also add custom colors (light colors for higher education to dark colors for lower education), normalizing the percentage bar so that stakeholders can see the comparison more clearly and more easily.
+
+3.1.2. Key Finding 2:
+```{r 3.1.2, echo=FALSE, warning=FALSE, message=FALSE}
+plot_duration_key <- plot_ly(
+  data = clean_data,
+  x = ~y,
+  y = ~duration,
+  type = "box",
+  color = ~y,
+  colors = c("#FF6B6B", "#4ECDC4")) %>%
+  layout(
+    title = list(text = "Longer Calls Drive Subscriptions", y = 0.95, x = 0.5),
+    xaxis = list(title = "Subscription Outcome", tickangle = 0),
+    yaxis = list(title = "Call Duration (Seconds)", range = c(0, 1200), dtick = 200),
+    annotations = list(
+      list(
+        x = 0, y = 150, text = "Median: ~150s", showarrow = TRUE, arrowhead = 1,
+        ax = 20, ay = -40, xanchor = "left", font = list(color = "#FF6B6B", size = 10)
+      ),
+      list(
+        x = 1, y = 400, text = "Median: ~400s", showarrow = TRUE, arrowhead = 1,
+        ax = -20, ay = -40, xanchor = "right", font = list(color = "#4ECDC4", size = 10)
+      )
+    ),
+    showlegend = FALSE,
+    margin = list(t = 60, b = 60)
+  )
+plot_duration_key
+```
+For the second chart, I used a boxplot scatterplot to compare the duration of calls with subscribed clients. I also used custom colors here to clearly highlight what is visible. I also added annotations pointing to the median value of both groups to further highlight what is visible and what I want to convey to stakeholders.
+
+#### 3.2. Interpretation:
+The data shows that clients in professional roles, like admin, management, or technician tend to have higher proportions of higher education, where blue-collar jobs are dominated by lower education levels. We also know from before, that retired is the highest job in accepting the subscription, but it turns out that the pattern we see is the most clients are in blue-collar with education "below high school", technicians with education "higher education", then interestingly in the service section, "high school" which is not a combined segment can dominate, and etc, which might correlate with lower response rates. Additionally, the second chart shows a clear trend that longer call durations are associated with higher subscription rates. Clients who subscribed ("yes") had a median call duration of around 400 seconds, while those who did not subscribe ("no") had a median closer to 150 seconds, as shown in the annotated boxplot. This means that longer conversations give better chances to explain things, or maybe it shows that the client is more interested. From the chart, we observe strong associations.
+
+#### 3.3. Business Recommendations:
+1. Focus campaign efforts on job types with the highest “yes” rates and those with higher education levels <br>
+=> From the first chart, we can see the different education levels for each job. Jobs like “admin” and “management” have more people with higher education. But if we look at the previous actual campaign result (job vs. y), we can see that “retired” people actually say “yes” the most, even though most of them don’t have higher education. On the other hand, people with “blue-collar” jobs usually say “no,” no matter what their education level is. <br>
+=> This shows that focusing only on education might not work well. It’s better to look at job types, since that seems to affect the result more directly. Still, we shouldn’t ignore people with higher education. They can still be a good target, especially if they also work in jobs like “admin,” “technician,” or “management.” The main idea is to focus on the groups who are more likely to say “yes,” but also keep trying with the educated group using messages that fit their background better.
+
+2. Encourage longer and more meaningful conversations during calls <br>
+=> The second chart shows something very clear, people who said “yes” usually had longer calls, with a middle value (median) approximately at 400 seconds. People who said “no” had much shorter calls, with a median of only approximately at 150 seconds. This means that longer calls are more likely to end in success. A longer call gives more time to explain the offer, build trust, and help the client decide. <br>
+=> Because of that, the goal should not just be to make more calls, but to improve the quality of each call. This can be done by training agents to not rush, ask questions, and listen better. The script should also be more flexible and sound more natural. If a call is too short and the client says “no,” maybe it’s just because they didn’t get enough info. So encouraging agents to keep the conversation going can help get better results.
